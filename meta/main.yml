@@ -1,0 +1,3 @@
+---
+dependencies:
+  - { role: caddy, when: caddy_url != "" }

@@ -1,0 +1,85 @@
+---
+- name: Compute full install directory
+  set_fact: full_install_dir="{{install_dir}}/netdata"
+  when: install_dir != ""
+
+- name: Install required apt packages
+  apt: name="{{ item }}" update_cache=yes cache_valid_time=3600
+  with_items:
+    - zlib1g-dev
+    - uuid-dev
+    - libmnl-dev
+    - gcc
+    - make
+    - git
+    - autoconf
+    - autoconf-archive
+    - autogen
+    - automake
+    - pkg-config
+    - curl
+  become: true
+  when: ansible_pkg_mgr == 'apt'
+
+- name: Install required yum packages
+  yum: name="{{ item }}" update_cache=yes cache_valid_time=3600
+  with_items:
+    - autoconf
+    - automake
+    - curl
+    - gcc
+    - git
+    - libmnl-devel
+    - libuuid-devel
+    - lm_sensors
+    - make
+    - MySQL-python
+    - nc
+    - pkgconfig
+    - python
+    - python-psycopg2
+    - PyYAML
+    - zlib-devel
+  become: true
+  when: ansible_pkg_mgr == 'yum'
+
+- name: Clone or pull for install or update
+  git:
+    repo: https://github.com/firehol/netdata.git
+    dest: /tmp/netdata
+    depth: "1"
+  register: clone_or_pull
+
+- name: Build and install
+  shell: "./netdata-installer.sh --install {{install_dir}} --dont-wait"
+  args:
+    chdir: /tmp/netdata
+  notify: restart netdata
+  when: clone_or_pull.changed == True
+  become: yes
+
+- name: Copy service configuration
+  template:
+    src: netdata.service.j2
+    dest: /etc/systemd/system/netdata.service
+    owner: root
+    group: root
+    mode: 0744
+  notify: restart netdata
+
+- name: Enable netdata service
+  service: name=netdata enabled=yes
+
+- name: Start netdata service
+  service: name=netdata state=started
+
+- name: Insert Caddy configuration
+  blockinfile:
+    dest: "{{ caddyfile }}"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - netdata"
+    block: |
+      {{ caddy_url }} {
+          proxy / localhost:19999
+      }
+  when: caddy_url != ""
+  notify: restart caddy
